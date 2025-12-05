@@ -70,4 +70,4 @@ class SpikingPolicyNetwork:
         
         new_output_accum = state.output_accum + output_spikes
         
-        return SNNState(lif_state=new_lif_state, output_accum=new_output_accum), output_spikes
+        return SNNState(lif_state=new_lif_state, output_accum=new_output_accum), output_spikes, output_current

@@ -44,15 +44,26 @@ class TestEnhancements(unittest.TestCase):
         self.assertIsNotNone(prog)
         
     def test_inducer(self):
+        import jax
+        import jax.flatten_util
+        from emergent_arc.network.snn import SpikingPolicyNetwork
+        
+        # Get real param size
+        snn = SpikingPolicyNetwork()
+        key = jax.random.PRNGKey(0)
+        params = snn.init_params(key)
+        flat, _ = jax.flatten_util.ravel_pytree(params)
+        param_size = len(flat)
+        
         def mock_evolver():
-            return Island(0, 10, 100)
+            return Island(0, 10, param_size)
             
         lib = SubroutineLibrary()
         vets = VeteranPool()
         inducer = OnlineProgramInducer(mock_evolver, lib, vets)
         
-        train_pairs = [(np.zeros((5,5)), np.zeros((5,5)))]
-        test_input = np.zeros((5,5))
+        train_pairs = [(np.zeros((5,5), dtype=int), np.zeros((5,5), dtype=int))]
+        test_input = np.zeros((5,5), dtype=int)
         
         candidates = inducer.solve_task(train_pairs, test_input, timeout=1.0)
         self.assertEqual(len(candidates), 2)
