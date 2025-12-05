@@ -91,6 +91,27 @@ class Nearest(Primitive):
 class Count(Primitive):
     predicate: Predicate
 
+@dataclass
+class Inside(Predicate):
+    obj_a: int
+    obj_b: int
+
+@dataclass
+class Outside(Predicate):
+    obj_a: int
+    obj_b: int
+
+@dataclass
+class AdjacentTo(Predicate):
+    obj_a: int
+    obj_b: int
+
+@dataclass
+class AlignedWith(Predicate):
+    obj_a: int
+    obj_b: int
+    axis: int # 0: horizontal, 1: vertical
+
 # --- Predicates ---
 
 @dataclass

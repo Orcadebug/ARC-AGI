@@ -14,54 +14,64 @@ class OnlineProgramInducer:
         self.veterans = veteran_pool
         self.validation_tasks = [] # Store recent tasks for validation
 
-    def solve_task(self, train_pairs: List[Tuple[np.ndarray, np.ndarray]], test_input: np.ndarray) -> np.ndarray:
+    def solve_task(self, train_pairs: List[Tuple[np.ndarray, np.ndarray]], test_input: np.ndarray, timeout: float = 60.0) -> List[np.ndarray]:
+        """
+        Solves the task and returns top-2 candidate predictions.
+        """
+        import time
+        start_time = time.time()
+        
         # Phase 1: Evolve on first training pair
-        # We create a temporary evolver (Island) for this task
-        # In a real system, we'd use multiple islands.
         input_grid, target_grid = train_pairs[0]
         
-        # Initialize population using veterans
-        # Simplified: just create an island and inject veterans
         island = self.evolver_factory()
         veteran_weights = self.veterans.sample(island.pop_size // 2)
         if veteran_weights:
-            # Inject into population
             for i, weights in enumerate(veteran_weights):
                 island.population[i] = weights
         
-        # Evolve
-        generations = 50 # Reduced for demo
-        for _ in range(generations):
-            # Define fitness function closure
+        # Evolve with budget
+        max_generations = 100
+        for gen in range(max_generations):
+            if time.time() - start_time > timeout * 0.8: # Reserve time for validation
+                break
+                
             def fitness_fn(weights):
-                # Decode weights to program (mocking this step as we don't have the full decoder yet)
-                # In real system: program = decode(weights)
+                # In real system: use self.decoder.decode_weights_to_program(weights)
                 # output = execute_dsl(program, input_grid)
                 # return compute_fitness(program, output, target_grid)
-                return 0.0 # Placeholder
+                return np.random.random() # Placeholder
             
             island.evaluate(fitness_fn)
             island.step()
             
-        # Phase 2: Cross-validate
-        # Get best candidates
-        candidates = island.get_migrants(10) # Top 10
+        # Phase 2: Cross-validate & Select Top-2
+        candidates = island.get_migrants(10)
         
-        best_program = None
-        best_score = -1.0
+        # Mock validation scoring
+        scored_candidates = []
+        for cand in candidates:
+            # Decode and validate on all train pairs
+            # score = validate(cand, train_pairs)
+            score = np.random.random() # Placeholder
+            scored_candidates.append((score, cand))
+            
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
         
-        # Mocking program decoding and validation
-        # In reality, we would decode 'candidates' (weights) into programs
-        # and test them on train_pairs[1:]
-        
-        # Phase 3: Apply best hypothesis
-        # For now, return a dummy prediction or the input
-        prediction = test_input.copy()
-        
-        # Phase 4: Consolidation
-        # self.consolidate(best_program)
-        
-        return prediction
+        # Return top 2 predictions
+        top_2 = []
+        for _, cand_weights in scored_candidates[:2]:
+            # Predict on test input
+            # program = self.decoder.decode_weights_to_program(cand_weights)
+            # prediction = execute_dsl(program, test_input)
+            prediction = test_input.copy() # Placeholder
+            top_2.append(prediction)
+            
+        # Ensure we always return 2 candidates (duplicate if needed)
+        while len(top_2) < 2:
+            top_2.append(test_input.copy())
+            
+        return top_2
 
     def consolidate(self, program: Program):
         if not program:

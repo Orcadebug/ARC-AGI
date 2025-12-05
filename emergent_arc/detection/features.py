@@ -103,7 +103,63 @@ def extract_global_features(grid: np.ndarray, objects: List[Dict]) -> np.ndarray
     non_bg = np.sum(grid != 0)
     total_pixels = H * W
     density = non_bg / total_pixels if total_pixels > 0 else 0.0
+
+    # 8. Border (Simplified check for solid border)
+    # Check if first/last row and col are same non-zero color
+    if H > 2 and W > 2:
+        top = grid[0, :]
+        bottom = grid[-1, :]
+        left = grid[:, 0]
+        right = grid[:, -1]
+        # Check if all border pixels are same color and not 0
+        border_pixels = np.concatenate([top, bottom, left, right])
+        unique_border = np.unique(border_pixels)
+        has_border = 1.0 if len(unique_border) == 1 and unique_border[0] != 0 else 0.0
+    else:
+        has_border = 0.0
+
+    # 9. Background Color (Most frequent color, usually 0 but can be others)
+    # We'll return the color index directly
+    counts = np.bincount(grid.flatten())
+    background_color = np.argmax(counts)
+
+    # 10. Unique Object Count (already have num_objects, maybe this means unique shapes?)
+    # Let's assume unique shapes based on shape_hash from object features
+    # We need to extract object features first to do this properly, but here we just have the list of objects
+    # Let's assume 'objects' list has 'mask'
+    # We can compute shape hash locally or assume it's passed.
+    # For now, let's just use number of unique colors as a proxy for unique objects if we define object by color
+    # Or better, let's count unique masks (expensive).
+    # Let's stick to unique colors for now as a simple proxy or just reuse num_objects if that's what it meant.
+    # Requirement says "unique_object". Let's assume it means "count of unique object SHAPES".
+    # We will implement a simple shape signature check.
+    unique_shapes = set()
+    for obj in objects:
+        # Simple shape signature: (height, width, area)
+        r, c = np.where(obj['mask'])
+        if len(r) > 0:
+            h = np.max(r) - np.min(r) + 1
+            w = np.max(c) - np.min(c) + 1
+            area = len(r)
+            unique_shapes.add((h, w, area))
+    num_unique_shapes = len(unique_shapes)
+
+    # 11. Majority Color (excluding background if background is 0, or just most frequent non-bg)
+    # If background is the most frequent, then majority_color is the 2nd most frequent
+    # If background is not 0, it's just the most frequent.
+    # Let's define majority_color as the most frequent NON-background color.
+    counts_no_bg = counts.copy()
+    if background_color == 0:
+        counts_no_bg[0] = 0
+    else:
+        # If background is not 0, we might still want the most frequent color that is NOT the background
+        counts_no_bg[background_color] = 0
     
+    if np.sum(counts_no_bg) > 0:
+        majority_color = np.argmax(counts_no_bg)
+    else:
+        majority_color = 0 # No other colors
+
     features = np.array([
         grid_width,
         grid_height,
@@ -112,7 +168,11 @@ def extract_global_features(grid: np.ndarray, objects: List[Dict]) -> np.ndarray
         has_symmetry_x,
         has_symmetry_y,
         has_symmetry_diag,
-        density
+        density,
+        has_border,
+        float(background_color),
+        float(num_unique_shapes),
+        float(majority_color)
     ], dtype=np.float32)
     
     return features

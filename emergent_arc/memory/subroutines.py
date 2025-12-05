@@ -62,3 +62,7 @@ class SubroutineLibrary:
         if 0 <= index < len(self.subroutines):
             return self.subroutines[index]
         return ()
+
+    def get_available_subroutines(self) -> Dict[int, Tuple]:
+        """Return a dictionary of available subroutine IDs and their signatures (actions)"""
+        return {i: sub for i, sub in enumerate(self.subroutines)}
