@@ -30,72 +30,92 @@ class ProgramDecoder:
         """
         Decodes a flat sequence of integers into a structured Program.
         """
+        from dataclasses import fields, is_dataclass
+        
         program = Program()
-        idx = 0
-        while idx < len(sequence):
-            token = sequence[idx]
-            
-            if token == 99: # Halt
-                break
-            
-            # Check for subroutine call
-            if token >= 100: # Arbitrary offset for subroutines
-                sub_id = token - 100
-                if self.subroutines.get_subroutine(sub_id):
-                    program.add_statement(Statement(SubroutineCall(sub_id)))
-                idx += 1
-                continue
-
-            # Check for primitive
-            if token in self.token_map:
-                primitive_cls = self.token_map[token]
+        # Use an iterator to consume tokens
+        token_iter = iter(sequence)
+        
+        try:
+            while True:
+                token = next(token_iter)
                 
-                # Handle control flow structures recursively
-                if primitive_cls == Foreach:
-                    # Foreach(filter, action)
-                    # Expect next tokens to define filter and action
-                    idx += 1
-                    if idx >= len(sequence): break
+                if token == 99: # Halt
+                    break
+                
+                # Check for subroutine call
+                if token >= 100: # Arbitrary offset for subroutines
+                    sub_id = token - 100
+                    if self.subroutines.get_subroutine(sub_id):
+                        program.add_statement(Statement(SubroutineCall(sub_id)))
+                    continue
+
+                # Check for primitive
+                if token in self.token_map:
+                    primitive_cls = self.token_map[token]
                     
-                    # Decode Filter
-                    filter_token = sequence[idx]
-                    # ... (Simplified: assume next token is filter predicate)
-                    # In full implementation, we'd need a more robust parser
-                    # For now, let's just skip complex nesting in this mock
-                    pass
-                elif primitive_cls == If:
-                    # If(cond, then, else)
-                    pass
-                else:
-                    # Simple Action
-                    # Parse arguments based on dataclass fields
-                    # This requires introspection or a predefined schema
-                    # For this demo, we'll just instantiate with dummy args or next tokens
-                    try:
-                        # Mock argument parsing: take next N tokens as args
-                        # num_args = len(fields(primitive_cls))
-                        # args = sequence[idx+1 : idx+1+num_args]
-                        # action = primitive_cls(*args)
-                        # program.add_statement(Statement(action))
-                        # idx += 1 + num_args
-                        
-                        # Simplified: Just add the class type for now to show structure
-                        # In real system, we need robust argument decoding
-                        pass
-                    except:
-                        pass
-            
-            idx += 1
+                    # Only Actions can be top-level statements
+                    if issubclass(primitive_cls, Action):
+                        try:
+                            action = self._decode_primitive(primitive_cls, token_iter)
+                            program.add_statement(Statement(action))
+                        except StopIteration:
+                            break
+                        except Exception as e:
+                            # Skip invalid action construction
+                            pass
+        except StopIteration:
+            pass
             
         return program
 
-    def decode_weights_to_program(self, weights: Any) -> Program:
-        """
-        Decodes continuous weights (from SNN/GA) into a Program.
-        Usually involves argmax to get tokens, then decode_sequence.
-        """
-        # Mock implementation
-        # Assume weights is already a sequence of tokens for this step
-        if isinstance(weights, list) or isinstance(weights, np.ndarray):
-            return self.decode_sequence(list(weights))
-        return Program()
+    def _decode_primitive(self, cls, token_iter):
+        from dataclasses import fields
+        
+        # Get fields
+        cls_fields = fields(cls)
+        args = {}
+        
+        for field in cls_fields:
+            # Check field type
+            ftype = field.type
+            
+            # Handle Optional/Union types (simplified: assume first type)
+            if hasattr(ftype, '__origin__') and ftype.__origin__ is Union:
+                ftype = ftype.__args__[0]
+                
+            if isinstance(ftype, type) and issubclass(ftype, (Action, Predicate, Filter)):
+                # Recursive decode
+                # Expect next token to be the class token for this type
+                # But wait, the grammar might not enforce explicit type tokens for arguments if they are polymorphic
+                # However, for things like 'Filter', it expects a 'Predicate'.
+                # We need to peek/consume the next token to see what Predicate it is.
+                
+                sub_token = next(token_iter)
+                if sub_token in self.token_map:
+                    sub_cls = self.token_map[sub_token]
+                    if issubclass(sub_cls, ftype):
+                        args[field.name] = self._decode_primitive(sub_cls, token_iter)
+                    else:
+                        # Token doesn't match expected type
+                        # Fallback: maybe use a default or error
+                        # For now, consume args for the WRONG class just to advance?
+                        # Or just error out.
+                        raise ValueError(f"Expected {ftype}, got {sub_cls}")
+                else:
+                    raise ValueError(f"Invalid token for {ftype}: {sub_token}")
+            else:
+                # Simple type (int, str, bool)
+                val_token = next(token_iter)
+                # Map token to value if needed, or use raw int
+                # For now, use raw int. 
+                # Ideally we'd map 0-9 to ints, but our tokens ARE ints.
+                # If field expects str, we might need a map.
+                if ftype is str:
+                    args[field.name] = str(val_token)
+                elif ftype is bool:
+                    args[field.name] = bool(val_token)
+                else:
+                    args[field.name] = val_token
+                    
+        return cls(**args)

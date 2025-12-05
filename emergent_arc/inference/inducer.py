@@ -27,28 +27,61 @@ class OnlineProgramInducer:
         from ..network.snn import SpikingPolicyNetwork
         from ..dsl.executor import execute_dsl
         from ..evolution.fitness import compute_fitness
-        from ..detection.features import extract_global_features
+        from ..detection.features import extract_global_features, extract_object_features
         from ..detection.cca import cca_4connected
         
         start_time = time.time()
         
         # Initialize SNN structure for parameter reshaping
-        # Assuming default dims for now, should match island creation
         snn = SpikingPolicyNetwork()
         dummy_key = jax.random.PRNGKey(0)
         dummy_params = snn.init_params(dummy_key)
         flat_params, unflatten_fn = jax.flatten_util.ravel_pytree(dummy_params)
         
+        def prepare_features(grid: np.ndarray) -> jnp.ndarray:
+            objects = cca_4connected(grid)
+            # Global features (12)
+            global_feats = extract_global_features(grid, objects)
+            
+            # Object features (16 objects * 7 features = 112)
+            obj_feats_list = []
+            # Sort objects by area (descending) to be consistent
+            # We need to compute area first or just extract features and sort
+            # Let's extract features for all objects first
+            all_obj_feats = []
+            grid_shape = grid.shape
+            for obj in objects:
+                f = extract_object_features(obj, grid_shape)
+                all_obj_feats.append(f)
+            
+            # Sort by area (index 1)
+            all_obj_feats.sort(key=lambda x: x[1], reverse=True)
+            
+            # Take top 16
+            max_objects = 16
+            feature_dim = 7
+            
+            for i in range(max_objects):
+                if i < len(all_obj_feats):
+                    obj_feats_list.extend(all_obj_feats[i])
+                else:
+                    obj_feats_list.extend([0.0] * feature_dim)
+            
+            # Concatenate
+            full_vector = np.concatenate([global_feats, np.array(obj_feats_list)])
+            
+            # Ensure size is 124
+            expected_dim = 124
+            if len(full_vector) < expected_dim:
+                full_vector = np.pad(full_vector, (0, expected_dim - len(full_vector)))
+            elif len(full_vector) > expected_dim:
+                full_vector = full_vector[:expected_dim]
+                
+            return jnp.array(full_vector)
+
         # Phase 1: Evolve on first training pair
         input_grid, target_grid = train_pairs[0]
-        
-        # Extract features once
-        # Note: extract_global_features returns numpy, convert to jax
-        input_objects = cca_4connected(input_grid)
-        features = extract_global_features(input_grid, input_objects)
-        features_jnp = jnp.array(features)
-        # Pad features to match SNN input dim (124)
-        padded_features = jnp.pad(features_jnp, (0, 124 - len(features_jnp)))
+        padded_features = prepare_features(input_grid)
         
         island = self.evolver_factory()
         veteran_weights = self.veterans.sample(island.pop_size // 2)
@@ -65,20 +98,15 @@ class OnlineProgramInducer:
             def fitness_fn(weights):
                 try:
                     # 1. Unflatten weights to SNN params
-                    # Ensure weights are jnp array
                     weights_jnp = jnp.array(weights)
                     params = unflatten_fn(weights_jnp)
                     
                     # 2. Run SNN to get tokens
                     state = snn.init_state()
                     tokens = []
-                    # Run for fixed number of steps (e.g. 20) to generate program sequence
-                    # Autoregressive-ish: Input is static features for now
-                    # In full version, input could be updated state
                     curr_state = state
                     for _ in range(20):
                         curr_state, spikes, logits = snn.forward(params, curr_state, padded_features)
-                        # Argmax logits to get token
                         token = int(jnp.argmax(logits))
                         tokens.append(token)
                         if token == 99: # Halt
@@ -93,7 +121,6 @@ class OnlineProgramInducer:
                     # 5. Compute Fitness
                     return compute_fitness(program, output, target_grid)
                 except Exception as e:
-                    # Fallback for stability
                     return 0.0
             
             island.evaluate(fitness_fn)
@@ -102,10 +129,8 @@ class OnlineProgramInducer:
         # Phase 2: Cross-validate & Select Top-2
         candidates = island.get_migrants(10)
         
-        # Mock validation scoring
         scored_candidates = []
         for cand_weights in candidates:
-            # Decode and validate on all train pairs
             try:
                 weights_jnp = jnp.array(cand_weights)
                 params = unflatten_fn(weights_jnp)
@@ -135,13 +160,8 @@ class OnlineProgramInducer:
         # Return top 2 predictions
         top_2 = []
         for _, cand_weights in scored_candidates[:2]:
-            # Predict on test input
-            # Re-run SNN on test input features
             try:
-                test_objects = cca_4connected(test_input)
-                t_features = extract_global_features(test_input, test_objects)
-                t_features_jnp = jnp.array(t_features)
-                t_padded = jnp.pad(t_features_jnp, (0, 124 - len(t_features_jnp)))
+                t_padded = prepare_features(test_input)
                 
                 weights_jnp = jnp.array(cand_weights)
                 params = unflatten_fn(weights_jnp)

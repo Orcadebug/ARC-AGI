@@ -34,15 +34,43 @@ class TestEnhancements(unittest.TestCase):
         self.assertEqual(features[8], 1.0)
 
     def test_decoder(self):
+        from emergent_arc.dsl.primitives import Rotate
         lib = SubroutineLibrary()
         decoder = ProgramDecoder(lib)
-        # Mock sequence: [Rotate, 0, 90, Halt] -> [10, 0, 90, 99]
-        # Note: decoder implementation in this step was simplified and might not fully parse args yet,
-        # but should return a Program object.
+        # Sequence: [Rotate, 0, 90, Halt] -> [10, 0, 90, 99]
+        # Rotate takes object_id (int) and degrees (int)
         seq = [10, 0, 90, 99]
         prog = decoder.decode_sequence(seq)
         self.assertIsNotNone(prog)
+        self.assertEqual(len(prog.statements), 1)
+        action = prog.statements[0].action
+        self.assertIsInstance(action, Rotate)
+        self.assertEqual(action.object_id, 0)
+        self.assertEqual(action.degrees, 90)
+
+    def test_executor(self):
+        from emergent_arc.dsl.executor import execute_dsl
+        from emergent_arc.dsl.grammar import Program, Statement
+        from emergent_arc.dsl.primitives import Rotate, Translate
         
+        # Test Rotate
+        grid = np.zeros((5, 5), dtype=int)
+        grid[1:4, 2] = 1 # Vertical line at col 2
+        # Mask: (1,2), (2,2), (3,2)
+        # Rotate 90 deg -> Horizontal line
+        
+        prog = Program()
+        # Object 0 is the line
+        prog.add_statement(Statement(Rotate(object_id=0, degrees=90)))
+        
+        out = execute_dsl(prog, grid)
+        # Expected: Horizontal line. 
+        # Centroid of vertical line is (2, 2).
+        # Rotated horizontal line should be at row 2, cols 1-3?
+        # Let's check if output changed
+        self.assertFalse(np.array_equal(out, grid))
+        self.assertEqual(np.sum(out), 3) # Area preserved
+
     def test_inducer(self):
         import jax
         import jax.flatten_util
@@ -65,6 +93,7 @@ class TestEnhancements(unittest.TestCase):
         train_pairs = [(np.zeros((5,5), dtype=int), np.zeros((5,5), dtype=int))]
         test_input = np.zeros((5,5), dtype=int)
         
+        # This will now trigger full feature extraction
         candidates = inducer.solve_task(train_pairs, test_input, timeout=1.0)
         self.assertEqual(len(candidates), 2)
         self.assertEqual(candidates[0].shape, (5,5))
